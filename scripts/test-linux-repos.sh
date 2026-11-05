@@ -64,10 +64,22 @@ SIGNING_KEY="$key" PASSPHRASE_FILE="$pass" PACKAGES_BASE="file://$work/served" \
   bash "$here/scripts/linux-repos.sh" "$products" "$in" "$out"
 
 fail() { echo "✗ $*" >&2; exit 1; }
+# dnf's primary index, however this createrepo_c compressed it (gzip, zstd, xz or bzip2).
+primary() {
+  local file
+  file=$(find "$1/repodata" -name '*primary.xml*' | head -1)
+  case "$file" in
+    *.gz) zcat "$file" ;;
+    *.zst) zstd -dc "$file" ;;
+    *.xz) xzcat "$file" ;;
+    *.bz2) bzcat "$file" ;;
+    *) fail "no primary index in $1/repodata" ;;
+  esac
+}
 for name in qso-graph-one qso-graph-two; do
   for arch in x86_64 aarch64; do
     [ -f "$out/rpm/$arch/$name-1.0.0-linux-$arch.rpm" ] || fail "$name $arch .rpm not in dnf's repository"
-    grep -q "<name>$name</name>" <(zcat "$out"/rpm/"$arch"/repodata/*-primary.xml.gz) || fail "$name not in $arch's index"
+    grep -q "<name>$name</name>" <(primary "$out/rpm/$arch") || fail "$name not in $arch's index"
   done
   for arch in amd64 arm64; do
     grep -q "^Package: $name$" "$out/apt/dists/stable/main/binary-$arch/Packages" || fail "$name not in apt's $arch index"

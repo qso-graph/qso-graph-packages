@@ -22,7 +22,7 @@ jobs:
       - name: The tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq rpm createrepo-c apt-utils gnupg >/dev/null
+          sudo apt-get install -y -qq rpm createrepo-c apt-utils gnupg zstd >/dev/null
       - name: Two products, signed and indexed
         run: bash scripts/test-linux-repos.sh
       - name: stale-keys
