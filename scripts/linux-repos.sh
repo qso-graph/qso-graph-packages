@@ -28,6 +28,9 @@ in=${2:?usage: linux-repos.sh <products.tsv> <packages-dir> <repo-dir>}
 out=${3:?usage: linux-repos.sh <products.tsv> <packages-dir> <repo-dir>}
 key=${SIGNING_KEY:?SIGNING_KEY: the fingerprint of the release key}
 pass=${PASSPHRASE_FILE:?PASSPHRASE_FILE: a file holding its passphrase}
+# Where to list the .rpm files signed here rather than kept as served, one path in <repo-dir> a line:
+# the upload rewrites exactly these, since a new signature need not change a file's size.
+signed_list=${SIGNED_LIST:-/dev/null}
 [[ $key =~ ^[0-9A-F]{40}$ ]] || { echo "SIGNING_KEY is not a fingerprint: $key" >&2; exit 2; }
 base=https://packages.qso-graph.net
 
@@ -83,6 +86,16 @@ contents() {
   done
   return 1
 }
+# rpm 6 signs a v6 package with a v6 signature only, which rpm 4 (RHEL and Rocky 9, Fedora before 43)
+# does not read: dnf there refused QSO Graph Trust 0.1.0 as "not signed". --rpmv4 adds the v4 header
+# signature beside it; rpm 4, which makes only that one, does not know the option.
+v4=()
+if rpmsign --help 2>&1 | grep -q -- '--rpmv4'; then v4=(--rpmv4); fi
+# A v4 header signature that verifies against the release key, readable by every rpm we serve.
+v4_signed() {
+  [[ $(rpm -qp --qf '%{RSAHEADER:pgpsig}' "$1" 2>/dev/null) =~ ^RSA/ ]] \
+    && rpm --dbpath "$rpmdb" --checksig "$1" 2>/dev/null | grep -q 'digests signatures OK'
+}
 for arch in x86_64 aarch64; do mkdir -p "$out/rpm/$arch"; done
 for file in "${rpms[@]}"; do
   name=$(basename "$file")
@@ -97,18 +110,19 @@ for file in "${rpms[@]}"; do
   built=$(contents "$file") \
     || { echo "rpm gives no header and payload digests for $name: cannot tell a served copy from it" >&2; exit 1; }
   if curl -fsS --retry 3 --proto '=https,file' -o "$dest" "$served_base/rpm/$arch/$name" 2>/dev/null \
-    && [ "$(contents "$dest")" = "$built" ] \
-    && rpm --dbpath "$rpmdb" --checksig "$dest" 2>/dev/null | grep -q 'digests signatures OK'; then
+    && [ "$(contents "$dest")" = "$built" ] && v4_signed "$dest"; then
     echo "Kept as served: $name"
     continue
   fi
   cp "$file" "$dest"
   echo "Signed: $name"
-  rpmsign --addsign \
+  rpmsign --addsign "${v4[@]}" \
     --define "__gpg $(command -v gpg)" \
     --define "_gpg_name $key" \
     --define "_gpg_sign_cmd_extra_args --batch --pinentry-mode loopback --passphrase-file $pass" \
     "$out/rpm/$arch/$name" >/dev/null
+  v4_signed "$dest" || { echo "$name has no v4 signature by the release key after signing" >&2; exit 1; }
+  echo "rpm/$arch/$name" >> "$signed_list"
 done
 for arch in x86_64 aarch64; do
   createrepo_c --quiet "$out/rpm/$arch"
