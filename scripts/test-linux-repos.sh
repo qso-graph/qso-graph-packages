@@ -2,13 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # scripts/linux-repos.sh, run as the Packages workflow runs it, on packages for two products made here,
 # signed with a key made here for the test and thrown away: never the release key. Needs rpm, rpmbuild,
-# createrepo_c, apt-ftparchive, dpkg-deb and gpg (Ubuntu: rpm createrepo-c apt-utils gnupg).
+# createrepo_c, apt-ftparchive, dpkg-deb, gpg and curl (Ubuntu: rpm createrepo-c apt-utils gnupg curl).
 #
 #   scripts/test-linux-repos.sh
 #
 # Proves: both products' packages are in both repositories, every .rpm and index is signed and
 # verifies, dnf's and apt's files are where Desktop's users have them and under QSO Graph's names too,
-# the apt Label is unchanged, and a file for no listed product is refused (a planted case).
+# the apt Label is unchanged, a package already served is kept byte for byte on rpm 4 and rpm 6, and
+# a served copy of another package or a file for no listed product is not taken (planted cases).
 set -euo pipefail
 here=$(cd "$(dirname "$0")/.." && pwd)
 work=$(mktemp -d)
@@ -94,6 +95,27 @@ grep -qF 'baseurl=https://packages.qso-graph.net/rpm/$basearch' "$out/qso-graph-
 grep -qF 'gpgkey=https://packages.qso-graph.net/qso-graph-desktop.asc' "$out/qso-graph-desktop.repo" || fail "qso-graph-desktop.repo's key"
 gpg --batch --verify "$out/apt/dists/stable/InRelease" 2>/dev/null || fail "InRelease"
 echo "✓ two products in apt and dnf, signed, under both names"
+
+# Built again with that repository served: every .rpm is kept as served, byte for byte, so dnf's index
+# names the files that are there (#143). A signature carries its time, so signing again would differ.
+SIGNING_KEY="$key" PASSPHRASE_FILE="$pass" PACKAGES_BASE="file://$out" \
+  bash "$here/scripts/linux-repos.sh" "$products" "$in" "$work/again" > "$work/again.log"
+for name in qso-graph-one qso-graph-two; do
+  for arch in x86_64 aarch64; do
+    file="rpm/$arch/$name-1.0.0-linux-$arch.rpm"
+    grep -qxF "Kept as served: $(basename "$file")" "$work/again.log" || fail "$file signed again, not kept"
+    cmp -s "$out/$file" "$work/again/$file" || fail "$file differs from the served copy"
+  done
+done
+echo "✓ packages already served are kept, byte for byte"
+
+# Planted: a served copy that is not this release's package is signed anew, not kept.
+mkdir -p "$work/other/rpm/x86_64"
+cp "$out/rpm/aarch64/qso-graph-one-1.0.0-linux-aarch64.rpm" "$work/other/rpm/x86_64/qso-graph-one-1.0.0-linux-x86_64.rpm"
+SIGNING_KEY="$key" PASSPHRASE_FILE="$pass" PACKAGES_BASE="file://$work/other" \
+  bash "$here/scripts/linux-repos.sh" "$products" "$in" "$work/other-out" > "$work/other.log"
+grep -qxF 'Signed: qso-graph-one-1.0.0-linux-x86_64.rpm' "$work/other.log" || fail "another package was kept as this one"
+echo "✓ a served copy of another package is not kept"
 
 # Planted: a file for a product products.tsv does not list is refused.
 cp "$in/qso-graph-one-1.0.0-linux-amd64.deb" "$in/qso-graph-stray-1.0.0-linux-amd64.deb"

@@ -71,7 +71,18 @@ rpmdb=$(mktemp -d)
 trap 'rm -rf "$rpmdb"' EXIT
 gpg --batch --armor --export "$key" > "$rpmdb/release-key.asc"
 rpm --dbpath "$rpmdb" --import "$rpmdb/release-key.asc"
-contents() { rpm -qp --qf '%{SHA256HEADER} %{PAYLOADDIGEST}' "$1" 2>/dev/null; }
+# rpm 6 calls the payload's digest PAYLOADSHA256 and refuses rpm 4's name, PAYLOADDIGEST, and rpm 4
+# refuses rpm 6's: whichever this rpm knows. Either says nothing for a name it does not know, and still
+# succeeds, so the answer is what is checked. On Ubuntu 26.04 the old name alone answered nothing, so
+# every package was signed again and its index named bytes that were never served (#143 again).
+contents() {
+  local tag got
+  for tag in PAYLOADSHA256 PAYLOADDIGEST; do
+    got=$(rpm -qp --qf "%{SHA256HEADER} %{${tag}}" "$1" 2>/dev/null) || true
+    [[ $got =~ ^[0-9a-f]{64}\ [0-9a-f]{64}$ ]] && { echo "$got"; return; }
+  done
+  return 1
+}
 for arch in x86_64 aarch64; do mkdir -p "$out/rpm/$arch"; done
 for file in "${rpms[@]}"; do
   name=$(basename "$file")
@@ -81,8 +92,12 @@ for file in "${rpms[@]}"; do
     *) echo "An .rpm for no architecture we serve: $name" >&2; exit 1 ;;
   esac
   dest="$out/rpm/$arch/$name"
+  # The release's own package always has digests: none means this rpm cannot read them, and signing
+  # anew would break dnf, so stop.
+  built=$(contents "$file") \
+    || { echo "rpm gives no header and payload digests for $name: cannot tell a served copy from it" >&2; exit 1; }
   if curl -fsS --retry 3 --proto '=https,file' -o "$dest" "$served_base/rpm/$arch/$name" 2>/dev/null \
-    && [ -n "$(contents "$file")" ] && [ "$(contents "$dest")" = "$(contents "$file")" ] \
+    && [ "$(contents "$dest")" = "$built" ] \
     && rpm --dbpath "$rpmdb" --checksig "$dest" 2>/dev/null | grep -q 'digests signatures OK'; then
     echo "Kept as served: $name"
     continue
