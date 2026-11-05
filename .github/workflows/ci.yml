@@ -1,0 +1,38 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# The repository build and its helper, on every pull request: real .deb and .rpm packages for two
+# products, signed with a key made for the test and thrown away, never the release key.
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  repos:
+    name: linux-repos.sh
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: The tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm createrepo-c apt-utils gnupg zstd >/dev/null
+      - name: Two products, signed and indexed
+        run: bash scripts/test-linux-repos.sh
+      - name: stale-keys
+        run: node --test tests/stale-keys.test.mjs
+
+  ci-all-green:
+    name: ci-all-green
+    if: always()
+    needs: [repos]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          [ "${{ needs.repos.result }}" = success ] || { echo "repos: ${{ needs.repos.result }}" >&2; exit 1; }
