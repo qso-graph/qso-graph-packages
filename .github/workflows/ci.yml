@@ -26,7 +26,7 @@ jobs:
       - name: Two products, signed and indexed
         run: bash scripts/test-linux-repos.sh
       - name: stale-keys
-        run: node --test tests/stale-keys.test.mjs
+        run: node --test tests/stale-keys.test.mjs tests/packages-workflow.test.mjs
 
   ci-all-green:
     name: ci-all-green
