@@ -23,3 +23,11 @@ test('the files uploaded with the packages leave built-from.txt out', () => {
   const upload = steps.find((step) => step.name === 'Uploaded to packages.qso-graph.net');
   assert.match(upload.body, /--exclude built-from\.txt/);
 });
+
+test('an .rpm signed in the run is uploaded again, whatever its size', () => {
+  const sign = steps.find((step) => step.name === 'Signed and indexed');
+  assert.match(sign.body, /SIGNED_LIST="\$RUNNER_TEMP\/signed-rpms"/);
+  const upload = steps.find((step) => step.name === 'Uploaded to packages.qso-graph.net');
+  assert.match(upload.body, /done < "\$RUNNER_TEMP\/signed-rpms"/);
+  assert.ok(upload.body.indexOf('signed-rpms') > upload.body.indexOf('--size-only'));
+});

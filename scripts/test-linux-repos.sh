@@ -61,7 +61,7 @@ done
 # Nothing is served yet: no copy to keep.
 mkdir -p "$work/served"
 out="$work/repo"
-SIGNING_KEY="$key" PASSPHRASE_FILE="$pass" PACKAGES_BASE="file://$work/served" \
+SIGNING_KEY="$key" PASSPHRASE_FILE="$pass" PACKAGES_BASE="file://$work/served" SIGNED_LIST="$work/signed" \
   bash "$here/scripts/linux-repos.sh" "$products" "$in" "$out"
 
 fail() { echo "✗ $*" >&2; exit 1; }
@@ -94,12 +94,20 @@ grep -q '^\[qso-graph\]$' "$out/qso-graph.repo" || fail "qso-graph.repo"
 grep -qF 'baseurl=https://packages.qso-graph.net/rpm/$basearch' "$out/qso-graph-desktop.repo" || fail "qso-graph-desktop.repo's baseurl"
 grep -qF 'gpgkey=https://packages.qso-graph.net/qso-graph-desktop.asc' "$out/qso-graph-desktop.repo" || fail "qso-graph-desktop.repo's key"
 gpg --batch --verify "$out/apt/dists/stable/InRelease" 2>/dev/null || fail "InRelease"
+# Every .rpm carries a v4 header signature, the one rpm 4 reads (RHEL and Rocky 9): rpm 6 alone makes
+# only a v6 one, which dnf there called "not signed". And each signed one is listed for the upload.
+for f in "$out"/rpm/*/*.rpm; do
+  [[ $(rpm -qp --qf '%{RSAHEADER:pgpsig}' "$f" 2>/dev/null) =~ ^RSA/ ]] || fail "$(basename "$f") has no v4 signature"
+done
+[ "$(LC_ALL=C sort "$work/signed")" = "$(cd "$out" && find rpm -name '*.rpm' | LC_ALL=C sort)" ] \
+  || fail "the signed list is not the .rpm files signed: $(cat "$work/signed")"
 echo "✓ two products in apt and dnf, signed, under both names"
 
 # Built again with that repository served: every .rpm is kept as served, byte for byte, so dnf's index
 # names the files that are there (#143). A signature carries its time, so signing again would differ.
-SIGNING_KEY="$key" PASSPHRASE_FILE="$pass" PACKAGES_BASE="file://$out" \
+SIGNING_KEY="$key" PASSPHRASE_FILE="$pass" PACKAGES_BASE="file://$out" SIGNED_LIST="$work/again.signed" \
   bash "$here/scripts/linux-repos.sh" "$products" "$in" "$work/again" > "$work/again.log"
+[ ! -s "$work/again.signed" ] || fail "kept packages listed as signed: $(cat "$work/again.signed")"
 for name in qso-graph-one qso-graph-two; do
   for arch in x86_64 aarch64; do
     file="rpm/$arch/$name-1.0.0-linux-$arch.rpm"
@@ -116,6 +124,16 @@ SIGNING_KEY="$key" PASSPHRASE_FILE="$pass" PACKAGES_BASE="file://$work/other" \
   bash "$here/scripts/linux-repos.sh" "$products" "$in" "$work/other-out" > "$work/other.log"
 grep -qxF 'Signed: qso-graph-one-1.0.0-linux-x86_64.rpm' "$work/other.log" || fail "another package was kept as this one"
 echo "✓ a served copy of another package is not kept"
+
+# Planted: a served copy of this very package without a v4 signature (as rpm 6 alone signs, or not
+# signed at all) is signed anew and listed, so the upload rewrites it.
+mkdir -p "$work/unsigned/rpm/x86_64"
+cp "$in/qso-graph-two-1.0.0-linux-x86_64.rpm" "$work/unsigned/rpm/x86_64/"
+SIGNING_KEY="$key" PASSPHRASE_FILE="$pass" PACKAGES_BASE="file://$work/unsigned" SIGNED_LIST="$work/unsigned.signed" \
+  bash "$here/scripts/linux-repos.sh" "$products" "$in" "$work/unsigned-out" > "$work/unsigned.log"
+grep -qxF 'Signed: qso-graph-two-1.0.0-linux-x86_64.rpm' "$work/unsigned.log" || fail "a served copy without a v4 signature was kept"
+grep -qxF 'rpm/x86_64/qso-graph-two-1.0.0-linux-x86_64.rpm' "$work/unsigned.signed" || fail "a package signed anew is not listed for the upload"
+echo "✓ every .rpm has a v4 signature, and one served without it is signed anew and rewritten"
 
 # Planted: a file for a product products.tsv does not list is refused.
 cp "$in/qso-graph-one-1.0.0-linux-amd64.deb" "$in/qso-graph-stray-1.0.0-linux-amd64.deb"

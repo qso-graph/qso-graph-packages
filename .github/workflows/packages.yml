@@ -172,7 +172,8 @@ jobs:
           echo "Loaded: $(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
           echo test | gpg --batch --pinentry-mode loopback --passphrase-file "$RUNNER_TEMP/passphrase" \
             --local-user "$RELEASE_KEY" --clearsign > /dev/null
-          SIGNING_KEY="$RELEASE_KEY" PASSPHRASE_FILE="$RUNNER_TEMP/passphrase" \
+          : > "$RUNNER_TEMP/signed-rpms"
+          SIGNING_KEY="$RELEASE_KEY" PASSPHRASE_FILE="$RUNNER_TEMP/passphrase" SIGNED_LIST="$RUNNER_TEMP/signed-rpms" \
             bash scripts/linux-repos.sh products.tsv "$RUNNER_TEMP/packages" "$RUNNER_TEMP/repo"
           # The Windows installers beside them, exactly as released (their CI signed them).
           if [ -d "$RUNNER_TEMP/windows" ]; then cp -R "$RUNNER_TEMP/windows" "$RUNNER_TEMP/repo/windows"; fi
@@ -210,6 +211,12 @@ jobs:
           # file already there is never written again. No package's name begins another's.
           "${s3[@]}" sync . "s3://${R2_BUCKET}/" --size-only --exclude '*' --include '*.deb' --include '*.rpm' --include '*.exe' \
             --cache-control 'public, max-age=31536000, immutable'
+          # Except an .rpm signed in this run, not kept as served: its new signature need not change its
+          # size, so --size-only could keep the old file under an index naming the new one.
+          while IFS= read -r path; do
+            "${s3[@]}" cp "$path" "s3://${R2_BUCKET}/${path}" --cache-control 'public, max-age=31536000, immutable'
+            echo "rewrote ${path}"
+          done < "$RUNNER_TEMP/signed-rpms"
           "${s3[@]}" cp . "s3://${R2_BUCKET}/" --recursive --exclude '*.deb' --exclude '*.rpm' --exclude '*.exe' \
             --exclude built-from.txt --cache-control 'public, max-age=300'
           find . -type f -printf '%P\n' > "$RUNNER_TEMP/built-keys"
