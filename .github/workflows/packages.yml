@@ -1,0 +1,264 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# https://packages.qso-graph.net, on Cloudflare R2: QSO Graph's signed apt and dnf repositories, every
+# product products.tsv names in them, and Desktop's Windows installer at a versioned address for the
+# Microsoft Store:
+#   windows/<version>/qso-graph-desktop-<version>-win-x64.exe
+# Partner Center's EXE listing takes that address as its Package URL. The Store fetches the installer
+# from it, needs it to be the file itself (no redirect, which GitHub's download links are), and requires
+# the file at it never to change (Store policy 10.2.9): a version's file is never rewritten here.
+#
+# Worked out from the published releases every time: each product's newest Stable releases' .deb and
+# .rpm files, checked against their SHA256SUMS.txt, signed and indexed by scripts/linux-repos.sh, then
+# uploaded. Nothing is kept between runs but what is served, so the repositories can never disagree
+# with the Releases pages. It runs every hour and by hand; a run whose releases are the ones already
+# served (built-from.txt) stops there. No product's release calls it, so no product repository holds
+# the R2 token: only this one does.
+#
+# Signed with the release key, "QSO Graph Releases (Linux package signing key)", which KI7MT's root
+# key signs. The secret is checked to hold that key, by fingerprint, before anything is signed.
+#
+# Needs, in this repository's `packages` Environment (main only): LINUX_PACKAGE_SIGNING_KEY_PRIVATE and
+# LINUX_PACKAGE_SIGNING_KEY_PASSPHRASE; and for R2, three secrets named after what Cloudflare's token
+# page calls them: R2_ACCESS_KEY_ID (Access Key ID), R2_SECRET_ACCESS_KEY (Secret Access Key) and
+# R2_ENDPOINT (the S3 endpoint, https://<account>.r2.cloudflarestorage.com), from an Account API token
+# with Object Read & Write on the bucket R2_BUCKET (a variable) only. A run without them stops and says
+# which is missing. `upload: false` builds and checks everything and uploads nothing.
+name: Packages
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: 'Upload to packages.qso-graph.net; unchecked builds and checks only'
+        required: true
+        default: false
+        type: boolean
+      rebuild:
+        description: 'Build even if the releases are the ones already served'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: packages
+  cancel-in-progress: false
+
+env:
+  # The release key: RSA 4096, to 2036-10-24, signed by KI7MT's root key
+  # C177 6630 7115 78FE 9A2B  9F7F 18C0 F6B7 0DA2 F991.
+  RELEASE_KEY: E4EC9751F1AA66AB2BA508EF041096B9A6EBD256
+  # How many Stable releases of each product the repositories offer: the newest, and a few to go back to.
+  KEEP: 5
+  # A scheduled run uploads; a run by hand uploads only when asked.
+  UPLOAD: ${{ github.event_name == 'schedule' || inputs.upload }}
+
+jobs:
+  repos:
+    name: apt, dnf and the Windows installer
+    # The hourly run waits for PACKAGES_LIVE: until Desktop's own Release stops publishing to the same
+    # bucket, two builders would each remove what the other built. A run by hand always runs.
+    if: github.event_name != 'schedule' || vars.PACKAGES_LIVE == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: packages
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Everything it needs is set
+        env:
+          KEY: ${{ secrets.LINUX_PACKAGE_SIGNING_KEY_PRIVATE }}
+          PASSPHRASE: ${{ secrets.LINUX_PACKAGE_SIGNING_KEY_PASSPHRASE }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          missing=0
+          names="KEY PASSPHRASE"
+          [ "$UPLOAD" = true ] && names="$names R2_ENDPOINT R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY R2_BUCKET"
+          for name in $names; do
+            [ -n "${!name}" ] || { echo "✗ ${name} is not set" >&2; missing=$((missing + 1)); }
+          done
+          [ "$missing" = 0 ] || { echo "Not built: ${missing} setting(s) missing (above)." >&2; exit 1; }
+          if [ "$UPLOAD" = true ]; then
+            [[ $R2_BUCKET =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || { echo "✗ R2_BUCKET is not a bucket name." >&2; exit 1; }
+            [[ $R2_ENDPOINT =~ ^https://[0-9a-f]{32}(\.[a-z]{2,4})?\.r2\.cloudflarestorage\.com/?$ ]] || { echo "✗ R2_ENDPOINT is not an R2 S3 endpoint (https://<account>.r2.cloudflarestorage.com)." >&2; exit 1; }
+          fi
+          echo "✓ everything this run needs is set (upload: ${UPLOAD})"
+      - name: The releases to offer
+        id: releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REBUILD: ${{ inputs.rebuild || false }}
+        run: |
+          set -euo pipefail
+          : > "$RUNNER_TEMP/built-from.txt"
+          awk '!/^[[:space:]]*(#|$)/ { print $1, $2, $3 }' products.tsv > "$RUNNER_TEMP/products"
+          while read -r repo package windows; do
+            [[ $repo =~ ^qso-graph/[a-z0-9-]+$ ]] || { echo "Not a qso-graph repository: $repo" >&2; exit 1; }
+            gh release list --repo "$repo" --limit 200 --json tagName,isPrerelease,isDraft,publishedAt \
+              --jq "[.[] | select(.isPrerelease == false and .isDraft == false)] | sort_by(.publishedAt) | reverse | .[:${KEEP}] | .[].tagName" \
+              > "$RUNNER_TEMP/tags"
+            if [ ! -s "$RUNNER_TEMP/tags" ]; then echo "– ${package}: no Stable release yet"; continue; fi
+            while read -r tag; do
+              [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Not a release tag: $repo $tag" >&2; exit 1; }
+              # What was built: each release by its tag and its SHA256SUMS.txt, so a release replaced is seen.
+              sums=$(gh release download "$tag" --repo "$repo" --pattern SHA256SUMS.txt --output - | sha256sum | cut -d' ' -f1)
+              echo "$repo $package $windows $tag $sums" >> "$RUNNER_TEMP/built-from.txt"
+            done < "$RUNNER_TEMP/tags"
+          done < "$RUNNER_TEMP/products"
+          cat "$RUNNER_TEMP/built-from.txt"
+          served=$(curl -fsS --retry 3 "https://packages.qso-graph.net/built-from.txt?run=${GITHUB_RUN_ID}" || true)
+          if [ "$REBUILD" != true ] && [ "$served" = "$(cat "$RUNNER_TEMP/built-from.txt")" ]; then
+            echo "The releases are the ones already served: nothing to build."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: The tools
+        if: steps.releases.outputs.build == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm createrepo-c apt-utils gnupg >/dev/null
+      - name: The releases' Linux packages and Windows installers
+        if: steps.releases.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/packages"
+          while read -r repo package windows tag _; do
+            version=${tag#v}
+            dir="$RUNNER_TEMP/download/$package/$version"
+            mkdir -p "$dir"
+            gh release download "$tag" --repo "$repo" --dir "$dir" \
+              --pattern "${package}-${version}-linux-*.deb" --pattern "${package}-${version}-linux-*.rpm"
+            gh release download "$tag" --repo "$repo" --pattern SHA256SUMS.txt --output - > "$RUNNER_TEMP/sums"
+            # Each file as the release lists it in its SHA256SUMS.txt, and every one it lists is here.
+            esc=${version//./\\.}
+            grep -E " [ *]?${package}-${esc}-linux-[^ ]+\.(deb|rpm)$" "$RUNNER_TEMP/sums" > "$RUNNER_TEMP/listed" \
+              || { echo "✗ ${package} ${tag} lists no .deb or .rpm" >&2; exit 1; }
+            (cd "$dir" && sha256sum --check --strict "$RUNNER_TEMP/listed")
+            [ "$(ls "$dir" | wc -l)" = "$(wc -l < "$RUNNER_TEMP/listed")" ] || { echo "✗ ${package} ${tag}: files not in its SHA256SUMS.txt" >&2; exit 1; }
+            mv "$dir"/* "$RUNNER_TEMP/packages/"
+            if [ "$windows" = yes ]; then
+              mkdir -p "$RUNNER_TEMP/windows/$version"
+              gh release download "$tag" --repo "$repo" --dir "$RUNNER_TEMP/windows/$version" \
+                --pattern "${package}-${version}-win-x64.exe"
+              (cd "$RUNNER_TEMP/windows/$version" && grep -E " [ *]?${package}-${esc}-win-x64\\.exe$" "$RUNNER_TEMP/sums" \
+                | sha256sum --check --strict)
+            fi
+            echo "✓ ${package} ${tag}"
+          done < "$RUNNER_TEMP/built-from.txt"
+      - name: Signed and indexed
+        if: steps.releases.outputs.build == 'true'
+        env:
+          KEY: ${{ secrets.LINUX_PACKAGE_SIGNING_KEY_PRIVATE }}
+          PASSPHRASE: ${{ secrets.LINUX_PACKAGE_SIGNING_KEY_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          install -d -m 0700 "$GNUPGHOME"
+          printf '%s' "$PASSPHRASE" > "$RUNNER_TEMP/passphrase" && chmod 0600 "$RUNNER_TEMP/passphrase"
+          printf '%s\n' "$KEY" | gpg --batch --quiet --import
+          # The secret holds the release key, and the passphrase opens it: its
+          # fingerprint, and a signature made with it, before anything is signed.
+          echo "Loaded: $(gpg --batch --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')"
+          echo test | gpg --batch --pinentry-mode loopback --passphrase-file "$RUNNER_TEMP/passphrase" \
+            --local-user "$RELEASE_KEY" --clearsign > /dev/null
+          SIGNING_KEY="$RELEASE_KEY" PASSPHRASE_FILE="$RUNNER_TEMP/passphrase" \
+            bash scripts/linux-repos.sh products.tsv "$RUNNER_TEMP/packages" "$RUNNER_TEMP/repo"
+          # The Windows installers beside them, exactly as released (their CI signed them).
+          if [ -d "$RUNNER_TEMP/windows" ]; then cp -R "$RUNNER_TEMP/windows" "$RUNNER_TEMP/repo/windows"; fi
+          # What this build is of, last, so a run that stops part way is built again next time.
+          cut -d' ' -f1-5 "$RUNNER_TEMP/built-from.txt" > "$RUNNER_TEMP/repo/built-from.txt"
+          rm -f "$RUNNER_TEMP/passphrase"
+          rm -rf "$GNUPGHOME"
+      # Packages first, then the indexes that name them, then what is no longer
+      # named: an index never points at a file that is not there. A package's
+      # name is unique, so it is kept long; an index changes, so briefly.
+      #
+      # Not `aws s3 sync --delete` (Desktop #134): on R2 it deleted files it had just
+      # uploaded, where one name begins another (repomd.xml, repomd.xml.asc), and
+      # promoting 0.5.0 lost a dnf repository's repomd.xml that way. The indexes
+      # are copied, which compares nothing, and what is no longer named is worked
+      # out as a set by scripts/stale-keys.mjs: a key that was built is never removed.
+      - name: Uploaded to packages.qso-graph.net
+        if: steps.releases.outputs.build == 'true' && env.UPLOAD == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+          s3=(aws s3 --endpoint-url "${R2_ENDPOINT%/}" --only-show-errors)
+          cd "$RUNNER_TEMP/repo"
+          # Each file in one request, never in parts (Desktop 0.6.0: R2 lost a part and refused to
+          # finish it). R2 takes up to 5 GiB in one request; over 4 GiB is stopped here instead.
+          aws configure set default.s3.multipart_threshold 4GB
+          big=$(find . -type f -size +4G -printf '%P\n')
+          [ -z "$big" ] || { echo "✗ over 4 GiB, which R2 cannot take in one request: ${big}" >&2; exit 1; }
+          # A version's file never changes (the Store requires it of the installer), so --size-only: a
+          # file already there is never written again. No package's name begins another's.
+          "${s3[@]}" sync . "s3://${R2_BUCKET}/" --size-only --exclude '*' --include '*.deb' --include '*.rpm' --include '*.exe' \
+            --cache-control 'public, max-age=31536000, immutable'
+          "${s3[@]}" cp . "s3://${R2_BUCKET}/" --recursive --exclude '*.deb' --exclude '*.rpm' --exclude '*.exe' \
+            --exclude built-from.txt --cache-control 'public, max-age=300'
+          find . -type f -printf '%P\n' > "$RUNNER_TEMP/built-keys"
+          aws s3api list-objects-v2 --endpoint-url "${R2_ENDPOINT%/}" --bucket "$R2_BUCKET" --output json \
+            | jq -r '.Contents[]?.Key' > "$RUNNER_TEMP/served-keys"
+          node "$GITHUB_WORKSPACE/scripts/stale-keys.mjs" "$RUNNER_TEMP/built-keys" "$RUNNER_TEMP/served-keys" > "$RUNNER_TEMP/stale-keys"
+          while IFS= read -r key; do
+            "${s3[@]}" rm "s3://${R2_BUCKET}/${key}"
+            echo "removed ${key}"
+          done < "$RUNNER_TEMP/stale-keys"
+          # Last, once everything it names is served.
+          "${s3[@]}" cp built-from.txt "s3://${R2_BUCKET}/built-from.txt" --cache-control 'no-cache'
+          echo "$(wc -l < "$RUNNER_TEMP/built-keys") file(s) built, $(wc -l < "$RUNNER_TEMP/stale-keys") no longer named and removed"
+      - name: Served as built
+        if: steps.releases.outputs.build == 'true' && env.UPLOAD == 'true'
+        run: |
+          set -euo pipefail
+          # Every file the build made, from the public address, against what was built (Desktop #134,
+          # #143): checking only that a package was there passed while every .rpm differed from its index.
+          cd "$RUNNER_TEMP/repo"
+          checked=0
+          while IFS= read -r path; do
+            url="https://packages.qso-graph.net/${path}?run=${GITHUB_RUN_ID}"
+            served=$(set -o pipefail; curl -fsS --retry 3 "$url" | sha256sum | cut -d' ' -f1) || { echo "✗ ${path} is not served" >&2; exit 1; }
+            [ "$served" = "$(sha256sum < "$path" | cut -d' ' -f1)" ] || { echo "✗ ${path} is not what was built" >&2; exit 1; }
+            echo "✓ ${path}"
+            checked=$((checked + 1))
+          done < <(find . -type f -printf '%P\n' | LC_ALL=C sort)
+          echo "✓ all ${checked} file(s) served as built"
+          # Each newest Stable Windows installer, as the Store will fetch it: the file itself, no redirect.
+          while read -r _ package windows tag _; do
+            [ "$windows" = yes ] || continue
+            version=${tag#v}
+            path="windows/${version}/${package}-${version}-win-x64.exe"
+            [ -f "$path" ] || continue
+            url="https://packages.qso-graph.net/${path}"
+            code=$(curl -sS -o "$RUNNER_TEMP/served.exe" -w '%{http_code}' --max-redirs 0 "$url")
+            [ "$code" = 200 ] || { echo "✗ ${url} answered ${code}, not the file" >&2; exit 1; }
+            [ "$(sha256sum < "$RUNNER_TEMP/served.exe" | cut -d' ' -f1)" = "$(sha256sum < "$path" | cut -d' ' -f1)" ] \
+              || { echo "✗ ${path} is not what was released" >&2; exit 1; }
+            echo "✓ ${path}"
+          done < "$RUNNER_TEMP/built-from.txt"
+          newest=$(awk '$3 == "yes" { print $2, $4; exit }' "$RUNNER_TEMP/built-from.txt")
+          if [ -n "$newest" ]; then
+            package=${newest% *}; version=${newest#* v}
+            {
+              echo "### Microsoft Store (Partner Center, Packages)"
+              echo
+              echo "Package URL for ${package} ${version}: \`https://packages.qso-graph.net/windows/${version}/${package}-${version}-win-x64.exe\`"
+              echo "Installer parameters: \`/S\` · Architecture: x64 · Language: en-us"
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
