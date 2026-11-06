@@ -27,7 +27,9 @@ name: Packages
 
 on:
   schedule:
-    - cron: '17 * * * *'
+    # At 17 minutes past, GitHub started no scheduled run in the first six hours (none listed at all,
+    # not even one the PACKAGES_LIVE check skipped); a changed cron line is registered again.
+    - cron: '41 * * * *'
   workflow_dispatch:
     inputs:
       upload:
