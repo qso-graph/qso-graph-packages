@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # The repository build and its helper, on every pull request: real .deb and .rpm packages for two
 # products, signed with a key made for the test and thrown away, never the release key.
 name: CI

@@ -1,4 +1,4 @@
-<!-- SPDX-License-Identifier: GPL-3.0-only -->
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 # QSO Graph packages
 
 Install QSO Graph's programs on Linux with `apt` or `dnf`, and keep them up to date with the rest of
@@ -39,4 +39,4 @@ product's published releases ([`products.tsv`](products.tsv)), checks every file
 `SHA256SUMS.txt`, signs and indexes them ([`scripts/linux-repos.sh`](scripts/linux-repos.sh)), uploads
 them and checks each one as served. Nothing is edited by hand.
 
-GPL-3.0-only.
+GPL-3.0-or-later.

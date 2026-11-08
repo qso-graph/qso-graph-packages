@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # What packages.qso-graph.net offers: one product a line, its repository, its package name, and whether
 # its Windows installer is served too (for the Microsoft Store's fixed address). Each release of a
 # product attaches <package>-<version>-linux-{amd64,arm64}.deb and -linux-{x86_64,aarch64}.rpm, and lists

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # https://packages.qso-graph.net, on Cloudflare R2: QSO Graph's signed apt and dnf repositories, every
 # product products.tsv names in them, and Desktop's Windows installer at a versioned address for the
 # Microsoft Store:
