@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # scripts/linux-repos.sh, run as the Packages workflow runs it, on packages for two products made here,
 # signed with a key made here for the test and thrown away: never the release key. Needs rpm, rpmbuild,
 # createrepo_c, apt-ftparchive, dpkg-deb, gpg and curl (Ubuntu: rpm createrepo-c apt-utils gnupg curl).
@@ -44,7 +44,7 @@ Name: $name
 Version: 1.0.0
 Release: 1
 Summary: test
-License: GPL-3.0-only
+License: GPL-3.0-or-later
 %description
 test
 %install

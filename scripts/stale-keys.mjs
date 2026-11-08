@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // What packages.qso-graph.net holds that this build no longer names, so the
 // Packages workflow can remove it (Desktop #134).
 //

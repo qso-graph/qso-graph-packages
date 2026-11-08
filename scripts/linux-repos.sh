@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# SPDX-License-Identifier: GPL-3.0-only
+# SPDX-License-Identifier: GPL-3.0-or-later
 # QSO Graph's signed apt and dnf repositories, built from every product's Stable releases' .deb and
 # .rpm files (first built in qso-graph-desktop, #113 there):
 #

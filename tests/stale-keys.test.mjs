@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // What packages.qso-graph.net holds that a build no longer names: a set, never an order (Desktop #134).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

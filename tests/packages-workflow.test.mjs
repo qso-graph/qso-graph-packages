@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+// SPDX-License-Identifier: GPL-3.0-or-later
 // built-from.txt says a build is served, and a run that finds it served builds nothing. So it is written
 // only after every file is checked as served: written first, a failed run left a broken build recorded
 // as current and every run after it skipped the repair.
