@@ -9,6 +9,7 @@ package manager checks that what it installs is what QSO Graph released.
 |---|---|
 | `qso-graph-desktop` | QSO Graph Desktop, the application |
 | `qso-graph-trust` | `qg-trust`: sign and upload your logs to ARRL's Logbook of The World, with your key in your computer's credential store |
+| `qso-graph-interop` | `qg-interop`: listen to, decode and simulate WSJT-X, N1MM Logger+ and fldigi messages |
 
 ## Debian, Ubuntu
 
@@ -16,14 +17,14 @@ package manager checks that what it installs is what QSO Graph released.
 sudo curl -fsSL -o /usr/share/keyrings/qso-graph.gpg https://packages.qso-graph.net/qso-graph.gpg
 echo "deb [signed-by=/usr/share/keyrings/qso-graph.gpg] https://packages.qso-graph.net/apt stable main" | sudo tee /etc/apt/sources.list.d/qso-graph.list
 sudo apt update
-sudo apt install qso-graph-trust        # or qso-graph-desktop
+sudo apt install qso-graph-trust        # or qso-graph-desktop, qso-graph-interop
 ```
 
 ## Fedora, RHEL, Rocky
 
 ```sh
 sudo curl -fsSL -o /etc/yum.repos.d/qso-graph.repo https://packages.qso-graph.net/qso-graph.repo
-sudo dnf install qso-graph-trust        # or qso-graph-desktop
+sudo dnf install qso-graph-trust        # or qso-graph-desktop, qso-graph-interop
 ```
 
 dnf asks you to accept the key the first time. Its fingerprint is
