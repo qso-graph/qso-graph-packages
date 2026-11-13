@@ -7,3 +7,4 @@
 # repository                 package            windows
 qso-graph/qso-graph-desktop  qso-graph-desktop  yes
 qso-graph/qso-graph-trust    qso-graph-trust    no
+qso-graph/qso-graph-interop  qso-graph-interop  no
