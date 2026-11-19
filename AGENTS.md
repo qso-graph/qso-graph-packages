@@ -25,4 +25,4 @@
 - Change `products.tsv` and the repository build scripts; generated repositories are not edited by hand.
 - Install the CI prerequisites: `rpm`, `createrepo-c`, `apt-utils`, `gnupg`, and `zstd`.
 - Run the signed repository integration test: `bash scripts/test-linux-repos.sh`.
-- Run the workflow and key tests: `node --test tests/stale-keys.test.mjs tests/packages-workflow.test.mjs`.
+- Run the workflow and key tests: `node --test tests/`.

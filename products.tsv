@@ -2,10 +2,11 @@
 # What packages.qso-graph.net offers: one product a line, its repository, its package name, and whether
 # its Windows installer is served too (for the Microsoft Store's fixed address). Each release of a
 # product attaches <package>-<version>-linux-{amd64,arm64}.deb and -linux-{x86_64,aarch64}.rpm, and lists
-# them in its SHA256SUMS.txt. A product with no Stable release yet is skipped.
+# them in its SHA256SUMS.txt. A product with no Stable release yet is skipped. "since" is the first release
+# packaged under that name, for a product renamed after its first releases; "-" serves them all.
 #
-# repository                 package            windows
-qso-graph/qso-graph-desktop  qso-graph-desktop  yes
-qso-graph/qso-graph-trust    qso-graph-trust    no
-qso-graph/qso-graph-interop  qso-graph-interop  no
-qso-graph/qso-graph-dxcluster  qso-graph-dxcluster  no
+# repository                     package              windows  since
+qso-graph/qso-graph-desktop      qso-graph-desktop    yes      -
+qso-graph/qso-graph-trust        qso-graph-trust      no       -
+qso-graph/qso-graph-interop      qso-graph-interop    no       -
+qso-graph/qso-graph-dxcluster    qso-graph-dxcluster  no       v0.1.1
