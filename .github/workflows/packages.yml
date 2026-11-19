@@ -101,12 +101,12 @@ jobs:
         run: |
           set -euo pipefail
           : > "$RUNNER_TEMP/built-from.txt"
-          awk '!/^[[:space:]]*(#|$)/ { print $1, $2, $3 }' products.tsv > "$RUNNER_TEMP/products"
-          while read -r repo package windows; do
+          awk '!/^[[:space:]]*(#|$)/ { print $1, $2, $3, $4 }' products.tsv > "$RUNNER_TEMP/products"
+          while read -r repo package windows since; do
             [[ $repo =~ ^qso-graph/[a-z0-9-]+$ ]] || { echo "Not a qso-graph repository: $repo" >&2; exit 1; }
             gh release list --repo "$repo" --limit 200 --json tagName,isPrerelease,isDraft,publishedAt \
-              --jq "[.[] | select(.isPrerelease == false and .isDraft == false)] | sort_by(.publishedAt) | reverse | .[:${KEEP}] | .[].tagName" \
-              > "$RUNNER_TEMP/tags"
+              --jq "[.[] | select(.isPrerelease == false and .isDraft == false)] | sort_by(.publishedAt) | reverse | .[].tagName" \
+              | bash scripts/served-since.sh "$since" | sed -n "1,${KEEP}p" > "$RUNNER_TEMP/tags"
             if [ ! -s "$RUNNER_TEMP/tags" ]; then echo "– ${package}: no Stable release yet"; continue; fi
             while read -r tag; do
               [[ $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Not a release tag: $repo $tag" >&2; exit 1; }
